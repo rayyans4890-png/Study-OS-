@@ -1,21 +1,12 @@
-// Study OS
-// keeps tasks, exams, subjects and study time in localStorage
-
 var tasks = JSON.parse(localStorage.getItem("studyTasks") || "[]");
 var subjects = JSON.parse(localStorage.getItem("studySubjects") || "[]");
 var exams = JSON.parse(localStorage.getItem("studyExams") || "[]");
 var sessions = JSON.parse(localStorage.getItem("studySessions") || "[]");
 
-function saveTasks() { localStorage.setItem("studyTasks", JSON.stringify(tasks)); }
-function saveSubjects() { localStorage.setItem("studySubjects", JSON.stringify(subjects)); }
-function saveExams() { localStorage.setItem("studyExams", JSON.stringify(exams)); }
-function saveSessions() { localStorage.setItem("studySessions", JSON.stringify(sessions)); }
-
 function uid() {
   return Date.now() + "-" + Math.floor(Math.random() * 100000);
 }
 
-// escape html
 function esc(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
@@ -24,9 +15,6 @@ function esc(s) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-
-// ---- dates ----
-// dates are yyyy-mm-dd strings so they compare nicely
 
 function pad(n) { return String(n).padStart(2, "0"); }
 
@@ -73,20 +61,16 @@ function toast(msg) {
   setTimeout(function () { el.remove(); }, 2000);
 }
 
-// ---- subjects ----
-// subjects are simple: just a name and a color
-
 function addSubject(name, color) {
-  // if it already exists, update the color
   for (var i = 0; i < subjects.length; i++) {
     if (subjects[i].name.toLowerCase() == name.toLowerCase()) {
       if (color) subjects[i].color = color;
-      saveSubjects();
+      localStorage.setItem("studySubjects", JSON.stringify(subjects));
       return;
     }
   }
   subjects.push({ id: uid(), name: name, color: color || "#2c6e49" });
-  saveSubjects();
+  localStorage.setItem("studySubjects", JSON.stringify(subjects));
   refreshSubjectOptions();
 }
 
@@ -94,7 +78,7 @@ function deleteSubject(id) {
   for (var i = 0; i < subjects.length; i++) {
     if (subjects[i].id == id) { subjects.splice(i, 1); break; }
   }
-  saveSubjects();
+  localStorage.setItem("studySubjects", JSON.stringify(subjects));
   refreshSubjectOptions();
 }
 
@@ -117,14 +101,11 @@ function refreshSubjectOptions() {
   dl.innerHTML = html;
 }
 
-// ---- tasks ----
-
 function addTask(title, subject, due) {
   tasks.push({ id: uid(), title: title, subject: subject, due: due, done: false });
-  saveTasks();
+  localStorage.setItem("studyTasks", JSON.stringify(tasks));
 }
 
-// used by the home page, tasks page, and planner
 function taskRow(t) {
   var color = subjectColor(t.subject);
   var overdue = !t.done && t.due && t.due < todayStr();
@@ -164,7 +145,7 @@ function toggleTask(id) {
       break;
     }
   }
-  saveTasks();
+  localStorage.setItem("studyTasks", JSON.stringify(tasks));
   renderCurrent();
 }
 
@@ -172,10 +153,9 @@ function deleteTask(id) {
   for (var i = 0; i < tasks.length; i++) {
     if (tasks[i].id == id) { tasks.splice(i, 1); break; }
   }
-  saveTasks();
+  localStorage.setItem("studyTasks", JSON.stringify(tasks));
 }
 
-// unfinished first, then by due date
 function sortTasks(list) {
   var sorted = list.slice();
   sorted.sort(function (a, b) {
@@ -188,11 +168,9 @@ function sortTasks(list) {
   return sorted;
 }
 
-// ---- exams ----
-
 function addExam(name, subject, date, notes) {
   exams.push({ id: uid(), name: name, subject: subject, date: date, notes: notes });
-  saveExams();
+  localStorage.setItem("studyExams", JSON.stringify(exams));
 }
 
 function nextExam() {
@@ -204,14 +182,12 @@ function nextExam() {
   return upcoming.length ? upcoming[0] : null;
 }
 
-// ---- study sessions ----
-
 function addSession(subject, seconds) {
   sessions.push({
     id: uid(), subject: subject || "", seconds: seconds,
     date: todayStr(), at: Date.now()
   });
-  saveSessions();
+  localStorage.setItem("studySessions", JSON.stringify(sessions));
 }
 
 function secondsToday() {
@@ -223,7 +199,14 @@ function secondsToday() {
   return total;
 }
 
-// ---- navigation ----
+function sessionsToday() {
+  var count = 0;
+  var today = todayStr();
+  for (var i = 0; i < sessions.length; i++) {
+    if (sessions[i].date == today) count++;
+  }
+  return count;
+}
 
 var currentView = "home";
 
@@ -231,7 +214,7 @@ function navigate(view) {
   currentView = view;
 
   document.querySelectorAll(".nav-link").forEach(function (link) {
-    if (link.dataset.nav == view) link.classList.add("active");
+    if (link.getAttribute("href") == "#" + view) link.classList.add("active");
     else link.classList.remove("active");
   });
 
@@ -253,13 +236,10 @@ function renderCurrent() {
   else if (currentView == "subjects") renderSubjects();
 }
 
-// ---- home page ----
-
 function renderHome() {
   var el = document.getElementById("view-home");
   var today = todayStr();
 
-  // greeting based on time of day
   var hour = new Date().getHours();
   var greet;
   if (hour < 12) greet = "Good morning.";
@@ -270,7 +250,6 @@ function renderHome() {
     weekday: "long", month: "long", day: "numeric"
   });
 
-  // tasks due today or overdue
   var todays = [];
   for (var i = 0; i < tasks.length; i++) {
     if (!tasks[i].done && tasks[i].due && tasks[i].due <= today) todays.push(tasks[i]);
@@ -294,7 +273,6 @@ function renderHome() {
     ? todays.length + " thing" + (todays.length == 1 ? "" : "s") + " left"
     : "all clear";
 
-  // next exam
   var ne = nextExam();
   var examHTML;
   if (ne) {
@@ -312,14 +290,10 @@ function renderHome() {
     examHTML = '<p class="empty-msg">No exams scheduled.</p>';
   }
 
-  // focus summary for today
   var secs = secondsToday();
   var focusHTML;
   if (secs > 0) {
-    var count = 0;
-    for (var i = 0; i < sessions.length; i++) {
-      if (sessions[i].date == today) count++;
-    }
+    var count = sessionsToday();
     focusHTML = '<div class="row">' +
       '<div class="grow"><span class="task-title">' + fmtDuration(secs) + " studied</span></div>" +
       '<span class="muted">' + count + " session" + (count == 1 ? "" : "s") + '</span>' +
@@ -328,7 +302,6 @@ function renderHome() {
     focusHTML = '<p class="empty-msg">No study time yet today.</p>';
   }
 
-  // sidebar: quick counts
   var openCount = 0;
   for (var i = 0; i < tasks.length; i++) {
     if (!tasks[i].done) openCount++;
@@ -376,8 +349,6 @@ function renderHome() {
       '</aside>' +
     '</div>';
 }
-
-// ---- planner ----
 
 var calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 var selectedDay = todayStr();
@@ -472,16 +443,13 @@ function shiftMonth(n) {
   renderPlanner();
 }
 
-// ---- tasks page ----
-
 var taskFilter = "all";
 var editingTaskId = null;
 
 function renderTasks() {
   var el = document.getElementById("view-tasks");
 
-  // filter buttons
-  var filterNames = ["all", "today", "upcoming", "overdue", "done"];
+  const filterNames = ["all", "today", "upcoming", "overdue", "done"];
   var filtersHTML = "";
   for (var i = 0; i < filterNames.length; i++) {
     var f = filterNames[i];
@@ -491,7 +459,6 @@ function renderTasks() {
     filtersHTML += '<button class="' + cls + '" onclick="setFilter(\'' + f + '\')">' + label + "</button>";
   }
 
-  // task list
   var list = getFilteredTasks();
   var emptyMsg = "Nothing here. Try another filter.";
   if (!tasks.length) emptyMsg = "No tasks yet. Add one above.";
@@ -558,7 +525,6 @@ function submitTaskForm(e) {
   if (!title) return;
   if (subject) addSubject(subject);
   if (editingTaskId) {
-    // save changes to the existing task
     for (var i = 0; i < tasks.length; i++) {
       if (tasks[i].id == editingTaskId) {
         tasks[i].title = title;
@@ -567,7 +533,7 @@ function submitTaskForm(e) {
         break;
       }
     }
-    saveTasks();
+    localStorage.setItem("studyTasks", JSON.stringify(tasks));
     editingTaskId = null;
   } else {
     addTask(title, subject, due);
@@ -606,14 +572,11 @@ function confirmDeleteTask(id) {
   }
 }
 
-// ---- exams page ----
-
 var editingExamId = null;
 
 function renderExams() {
   var el = document.getElementById("view-exams");
 
-  // sort exams by date
   var sorted = exams.slice();
   sorted.sort(function (a, b) { return a.date.localeCompare(b.date); });
 
@@ -628,7 +591,6 @@ function renderExams() {
       else if (diff == 1) { badge = "tomorrow!"; cls = "soon"; }
       else { badge = diff + " days"; cls = ""; }
 
-      // format the date and subject line directly
       var dateFormatted = parseDate(e.date).toLocaleDateString("en-US", { month: "long", day: "numeric" });
       var meta = dateFormatted;
       if (e.subject) meta = esc(e.subject) + " · " + dateFormatted;
@@ -690,7 +652,6 @@ function submitExamForm(e) {
   if (subject) addSubject(subject);
 
   if (editingExamId) {
-    // find and update the exam directly
     for (var i = 0; i < exams.length; i++) {
       if (exams[i].id == editingExamId) {
         exams[i].name = name;
@@ -700,7 +661,7 @@ function submitExamForm(e) {
         break;
       }
     }
-    saveExams();
+    localStorage.setItem("studyExams", JSON.stringify(exams));
     editingExamId = null;
   } else {
     addExam(name, subject, date, notes);
@@ -739,12 +700,10 @@ function confirmDeleteExam(id) {
     for (var i = 0; i < exams.length; i++) {
       if (exams[i].id == id) { exams.splice(i, 1); break; }
     }
-    saveExams();
+    localStorage.setItem("studyExams", JSON.stringify(exams));
     renderExams();
   }
 }
-
-// ---- subjects page ----
 
 function renderSubjects() {
   var el = document.getElementById("view-subjects");
@@ -755,13 +714,11 @@ function renderSubjects() {
     for (var i = 0; i < subjects.length; i++) {
       var s = subjects[i];
 
-      // count open tasks for this subject
       var openCount = 0;
       for (var j = 0; j < tasks.length; j++) {
         if (!tasks[j].done && tasks[j].subject && tasks[j].subject.toLowerCase() == s.name.toLowerCase()) openCount++;
       }
 
-      // total study time for this subject
       var studied = 0;
       for (var j = 0; j < sessions.length; j++) {
         if (sessions[j].subject == s.name) studied += sessions[j].seconds;
@@ -823,8 +780,6 @@ function confirmDeleteSubject(id) {
   }
 }
 
-// ---- focus timer ----
-
 var PRESETS = [15, 25, 45, 60];
 var focusDuration = 25;
 var timer = {
@@ -839,12 +794,8 @@ var timer = {
 function renderFocus() {
   var el = document.getElementById("view-focus");
   var todaySecs = secondsToday();
-  var todayCount = 0;
-  for (var i = 0; i < sessions.length; i++) {
-    if (sessions[i].date == todayStr()) todayCount++;
-  }
+  var todayCount = sessionsToday();
 
-  // recent sessions list
   var recent = sessions.slice().reverse().slice(0, 8);
   var sessionHTML = "";
   if (recent.length) {
@@ -861,7 +812,6 @@ function renderFocus() {
     sessionHTML = '<p class="empty-msg">No sessions yet.</p>';
   }
 
-  // timer area — clock while running, setup form otherwise
   var timerHTML = "";
   if (timer.running || timer.left > 0) {
     var pct = timer.total > 0 ? Math.round((timer.left / timer.total) * 100) : 0;
@@ -999,7 +949,6 @@ function finishTimer() {
   renderFocus();
 }
 
-// restore timer if page was refreshed mid-session
 function restoreTimer() {
   var saved = JSON.parse(localStorage.getItem("studyTimer") || "null");
   if (!saved) return;
@@ -1016,14 +965,20 @@ function restoreTimer() {
   }
 }
 
-// ---- start ----
-
 document.addEventListener("DOMContentLoaded", function () {
   refreshSubjectOptions();
   restoreTimer();
 
-  var views = ["home", "focus", "planner", "tasks", "exams", "subjects"];
   var hash = location.hash.slice(1);
-  if (views.indexOf(hash) != -1) navigate(hash);
-  else navigate("home");
+  if (["home", "focus", "planner", "tasks", "exams", "subjects"].indexOf(hash) == -1) {
+    hash = "home";
+  }
+  navigate(hash);
+});
+
+window.addEventListener("hashchange", function () {
+  var view = location.hash.slice(1);
+  if (["home", "focus", "planner", "tasks", "exams", "subjects"].indexOf(view) != -1) {
+    navigate(view);
+  }
 });
