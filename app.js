@@ -1,1042 +1,1169 @@
-var tasks = JSON.parse(localStorage.getItem("studyTasks") || "[]");
-var subjects = JSON.parse(localStorage.getItem("studySubjects") || "[]");
-var exams = JSON.parse(localStorage.getItem("studyExams") || "[]");
-var sessions = JSON.parse(localStorage.getItem("studySessions") || "[]");
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-function saveTasks() { localStorage.setItem("studyTasks", JSON.stringify(tasks)); }
-function saveSubjects() { localStorage.setItem("studySubjects", JSON.stringify(subjects)); }
-function saveExams() { localStorage.setItem("studyExams", JSON.stringify(exams)); }
-function saveSessions() { localStorage.setItem("studySessions", JSON.stringify(sessions)); }
+type View = "home" | "focus" | "planner" | "tasks" | "exams" | "subjects";
+
+type Subject = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+type Task = {
+  id: string;
+  title: string;
+  subject: string;
+  due: string;
+  done: boolean;
+};
+
+type Exam = {
+  id: string;
+  name: string;
+  subject: string;
+  date: string;
+  notes: string;
+};
+
+type Session = {
+  id: string;
+  subject: string;
+  seconds: number;
+  date: string;
+  at: number;
+};
+
+type TimerState = {
+  running: boolean;
+  total: number;
+  left: number;
+  subject: string;
+  endAt: number;
+};
+
+type ToastState = {
+  id: number;
+  message: string;
+};
+
+const PRESETS = [15, 25, 45, 60];
 
 function uid() {
-  return Date.now() + "-" + Math.floor(Math.random() * 100000);
+  return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
 
-// escape html
-function esc(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function pad(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-// ---- dates ----
-// dates are yyyy-mm-dd strings so they compare nicely
-
-function pad(n) { return String(n).padStart(2, "0"); }
-
-function toISO(d) {
-  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+function toISO(d: Date) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function todayStr() { return toISO(new Date()); }
-
-function parseDate(s) {
-  var p = s.split("-");
-  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+function todayStr() {
+  return toISO(new Date());
 }
 
-function daysUntil(dateStr) {
-  var diff = parseDate(dateStr) - parseDate(todayStr());
+function parseDate(s: string) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function daysUntil(dateStr: string) {
+  const diff = parseDate(dateStr).getTime() - parseDate(todayStr()).getTime();
   return Math.round(diff / 86400000);
 }
 
-function fmtShort(s) {
+function fmtShort(s: string) {
   return parseDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function fmtDuration(sec) {
-  var h = Math.floor(sec / 3600);
-  var m = Math.round((sec % 3600) / 60);
-  if (h && m) return h + "h " + m + "m";
-  if (h) return h + "h";
-  return m + " min";
+function fmtDuration(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m} min`;
 }
 
-function fmtClock(sec) {
-  var h = Math.floor(sec / 3600);
-  var m = Math.floor((sec % 3600) / 60);
-  var s = sec % 60;
-  return pad(h) + ":" + pad(m) + ":" + pad(s);
+function fmtClock(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-function toast(msg) {
-  var el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(function () { el.remove(); }, 2000);
-}
-
-// ---- subjects ----
-// subjects are simple: just a name and a color
-
-function addSubject(name, color) {
-  // if it already exists, update the color
-  for (var i = 0; i < subjects.length; i++) {
-    if (subjects[i].name.toLowerCase() == name.toLowerCase()) {
-      if (color) subjects[i].color = color;
-      saveSubjects();
-      return;
-    }
+function loadFromStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
   }
-  subjects.push({ id: uid(), name: name, color: color || "#2c6e49" });
-  saveSubjects();
-  refreshSubjectOptions();
 }
 
-function deleteSubject(id) {
-  for (var i = 0; i < subjects.length; i++) {
-    if (subjects[i].id == id) { subjects.splice(i, 1); break; }
-  }
-  saveSubjects();
-  refreshSubjectOptions();
-}
-
-function subjectColor(name) {
-  for (var i = 0; i < subjects.length; i++) {
-    if (subjects[i].name.toLowerCase() == String(name).toLowerCase()) {
-      return subjects[i].color;
-    }
-  }
-  return null;
-}
-
-function refreshSubjectOptions() {
-  var dl = document.getElementById("subjectOptions");
-  if (!dl) return;
-  var html = "";
-  for (var i = 0; i < subjects.length; i++) {
-    html += '<option value="' + esc(subjects[i].name) + '"></option>';
-  }
-  dl.innerHTML = html;
-}
-
-// ---- tasks ----
-
-function addTask(title, subject, due) {
-  tasks.push({ id: uid(), title: title, subject: subject, due: due, done: false });
-  saveTasks();
-}
-
-// used by the home page, tasks page, and planner
-function taskRow(t) {
-  var color = subjectColor(t.subject);
-  var overdue = !t.done && t.due && t.due < todayStr();
-  var title = esc(t.title);
-  if (color) title = '<span class="dot" style="background:' + color + '"></span>' + title;
-
-  var meta = "";
-  if (t.subject) meta += "<span>" + esc(t.subject) + "</span> ";
-  if (t.due) {
-    var diff = daysUntil(t.due);
-    var label;
-    if (diff < 0) label = "overdue";
-    else if (diff == 0) label = "today";
-    else if (diff == 1) label = "tomorrow";
-    else label = fmtShort(t.due);
-    if (overdue) meta += '<span class="overdue">' + label + "</span>";
-    else meta += "<span>" + label + "</span>";
-  }
-
-  return '<div class="row task-row' + (t.done ? " done" : "") + '">' +
-    '<input type="checkbox" ' + (t.done ? "checked" : "") + ' onchange="toggleTask(\'' + t.id + '\')">' +
-    '<div class="grow">' +
-      '<div class="task-title">' + title + '</div>' +
-      '<div class="task-meta">' + meta + '</div>' +
-    '</div>' +
-    '<div class="task-actions">' +
-      '<button class="text-btn" onclick="startEditTask(\'' + t.id + '\')">edit</button>' +
-      '<button class="text-btn danger" onclick="confirmDeleteTask(\'' + t.id + '\')">delete</button>' +
-    '</div>' +
-  '</div>';
-}
-
-function toggleTask(id) {
-  for (var i = 0; i < tasks.length; i++) {
-    if (tasks[i].id == id) {
-      tasks[i].done = !tasks[i].done;
-      break;
-    }
-  }
-  saveTasks();
-  renderCurrent();
-}
-
-function deleteTask(id) {
-  for (var i = 0; i < tasks.length; i++) {
-    if (tasks[i].id == id) { tasks.splice(i, 1); break; }
-  }
-  saveTasks();
-}
-
-// unfinished first, then by due date
-function sortTasks(list) {
-  var sorted = list.slice();
-  sorted.sort(function (a, b) {
-    if (a.done != b.done) return a.done ? 1 : -1;
+function sortTasks(list: Task[]) {
+  return [...list].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
     if (a.due && b.due) return a.due.localeCompare(b.due);
     if (a.due) return -1;
     if (b.due) return 1;
     return 0;
   });
-  return sorted;
 }
 
-// ---- exams ----
+export default function App() {
+  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage("studyTasks", []));
+  const [subjects, setSubjects] = useState<Subject[]>(() => loadFromStorage("studySubjects", []));
+  const [exams, setExams] = useState<Exam[]>(() => loadFromStorage("studyExams", []));
+  const [sessions, setSessions] = useState<Session[]>(() => loadFromStorage("studySessions", []));
+  const [currentView, setCurrentView] = useState<View>("home");
 
-function addExam(name, subject, date, notes) {
-  exams.push({ id: uid(), name: name, subject: subject, date: date, notes: notes });
-  saveExams();
-}
+  const [taskFilter, setTaskFilter] = useState("all");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskSubject, setTaskSubject] = useState("");
+  const [taskDue, setTaskDue] = useState("");
 
-function nextExam() {
-  var upcoming = [];
-  for (var i = 0; i < exams.length; i++) {
-    if (daysUntil(exams[i].date) >= 0) upcoming.push(exams[i]);
-  }
-  upcoming.sort(function (a, b) { return a.date.localeCompare(b.date); });
-  return upcoming.length ? upcoming[0] : null;
-}
+  const [editingExamId, setEditingExamId] = useState<string | null>(null);
+  const [examName, setExamName] = useState("");
+  const [examSubject, setExamSubject] = useState("");
+  const [examDate, setExamDate] = useState("");
+  const [examNotes, setExamNotes] = useState("");
 
-// ---- study sessions ----
+  const [subjectName, setSubjectName] = useState("");
+  const [subjectColor, setSubjectColor] = useState("#2c6e49");
 
-function addSession(subject, seconds) {
-  sessions.push({
-    id: uid(), subject: subject || "", seconds: seconds,
-    date: todayStr(), at: Date.now()
-  });
-  saveSessions();
-}
+  const [calMonth, setCalMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [selectedDay, setSelectedDay] = useState(todayStr());
 
-function secondsToday() {
-  var total = 0;
-  var today = todayStr();
-  for (var i = 0; i < sessions.length; i++) {
-    if (sessions[i].date == today) total += sessions[i].seconds;
-  }
-  return total;
-}
-
-// ---- navigation ----
-
-var currentView = "home";
-
-function navigate(view) {
-  currentView = view;
-
-  document.querySelectorAll(".nav-link").forEach(function (link) {
-    if (link.dataset.nav == view) link.classList.add("active");
-    else link.classList.remove("active");
+  const [focusDuration, setFocusDuration] = useState(25);
+  const [focusSubject, setFocusSubject] = useState("");
+  const [timer, setTimer] = useState<TimerState>({
+    running: false,
+    total: 0,
+    left: 0,
+    subject: "",
+    endAt: 0,
   });
 
-  document.querySelectorAll(".view").forEach(function (page) {
-    if (page.id == "view-" + view) page.classList.add("active");
-    else page.classList.remove("active");
-  });
+  const [toast, setToast] = useState<ToastState | null>(null);
 
-  location.hash = view;
-  renderCurrent();
-}
+  useEffect(() => {
+    localStorage.setItem("studyTasks", JSON.stringify(tasks));
+  }, [tasks]);
 
-function renderCurrent() {
-  if (currentView == "home") renderHome();
-  else if (currentView == "focus") renderFocus();
-  else if (currentView == "planner") renderPlanner();
-  else if (currentView == "tasks") renderTasks();
-  else if (currentView == "exams") renderExams();
-  else if (currentView == "subjects") renderSubjects();
-}
+  useEffect(() => {
+    localStorage.setItem("studySubjects", JSON.stringify(subjects));
+  }, [subjects]);
 
-// ---- home page ----
+  useEffect(() => {
+    localStorage.setItem("studyExams", JSON.stringify(exams));
+  }, [exams]);
 
-function renderHome() {
-  var el = document.getElementById("view-home");
-  var today = todayStr();
+  useEffect(() => {
+    localStorage.setItem("studySessions", JSON.stringify(sessions));
+  }, [sessions]);
 
-  // greeting based on time of day
-  var hour = new Date().getHours();
-  var greet;
-  if (hour < 12) greet = "Good morning.";
-  else if (hour < 18) greet = "Good afternoon.";
-  else greet = "Good evening.";
+  useEffect(() => {
+    const views: View[] = ["home", "focus", "planner", "tasks", "exams", "subjects"];
+    const hash = window.location.hash.replace("#", "") as View;
+    if (views.includes(hash)) setCurrentView(hash);
 
-  var dateStr = new Date().toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric"
-  });
+    const onHashChange = () => {
+      const next = window.location.hash.replace("#", "") as View;
+      if (views.includes(next)) setCurrentView(next);
+    };
 
-  // tasks due today or overdue
-  var todays = [];
-  for (var i = 0; i < tasks.length; i++) {
-    if (!tasks[i].done && tasks[i].due && tasks[i].due <= today) todays.push(tasks[i]);
-  }
-  todays = sortTasks(todays);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
-  var todayHTML = "";
-  if (todays.length) {
-    todayHTML = '<div class="list">';
-    var showCount = Math.min(todays.length, 6);
-    for (var i = 0; i < showCount; i++) todayHTML += taskRow(todays[i]);
-    todayHTML += "</div>";
-    if (todays.length > 6) {
-      todayHTML += '<p class="muted">…and ' + (todays.length - 6) + " more in Tasks.</p>";
+  useEffect(() => {
+    window.location.hash = currentView;
+  }, [currentView]);
+
+  useEffect(() => {
+    const saved = loadFromStorage<{
+      endAt: number;
+      total: number;
+      subject: string;
+      left: number;
+      running: boolean;
+    } | null>("studyTimer", null);
+
+    if (!saved) return;
+
+    const left = saved.running === false ? saved.left : Math.round((saved.endAt - Date.now()) / 1000);
+
+    if (left > 0) {
+      setTimer({
+        running: saved.running !== false,
+        total: saved.total,
+        left,
+        subject: saved.subject || "",
+        endAt: saved.endAt,
+      });
+      setFocusSubject(saved.subject || "");
+    } else {
+      localStorage.removeItem("studyTimer");
+      setSessions((prev) => [
+        ...prev,
+        { id: uid(), subject: saved.subject || "", seconds: saved.total, date: todayStr(), at: Date.now() },
+      ]);
     }
-  } else {
-    todayHTML = '<p class="empty-msg">Nothing due today.</p>';
-  }
+  }, []);
 
-  var leftWord = todays.length
-    ? todays.length + " thing" + (todays.length == 1 ? "" : "s") + " left"
-    : "all clear";
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = setTimeout(() => setToast(null), 2000);
+    return () => clearTimeout(timeout);
+  }, [toast]);
 
-  // next exam
-  var ne = nextExam();
-  var examHTML;
-  if (ne) {
-    var diff = daysUntil(ne.date);
-    var when;
-    if (diff == 0) when = "today!";
-    else if (diff == 1) when = "tomorrow";
-    else when = fmtShort(ne.date) + " · in " + diff + " days";
-    var tag = ne.subject ? '<span class="tag">' + esc(ne.subject) + "</span>" : "";
-    examHTML = '<div class="row">' +
-      '<div class="grow"><span class="task-title">' + esc(ne.name) + '</span>' + tag + '</div>' +
-      '<span class="exam-when">' + when + '</span>' +
-    '</div>';
-  } else {
-    examHTML = '<p class="empty-msg">No exams scheduled.</p>';
-  }
+  useEffect(() => {
+    if (!timer.running) return;
 
-  // focus summary for today
-  var secs = secondsToday();
-  var focusHTML;
-  if (secs > 0) {
-    var count = 0;
-    for (var i = 0; i < sessions.length; i++) {
-      if (sessions[i].date == today) count++;
+    const interval = setInterval(() => {
+      setTimer((prev) => {
+        const left = Math.max(0, Math.round((prev.endAt - Date.now()) / 1000));
+        if (left <= 0) {
+          return { ...prev, running: false, left: 0 };
+        }
+        return { ...prev, left };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timer.running]);
+
+  useEffect(() => {
+    if (!timer.total) return;
+
+    if (timer.running || timer.left > 0) {
+      localStorage.setItem(
+        "studyTimer",
+        JSON.stringify({
+          endAt: timer.endAt,
+          total: timer.total,
+          subject: timer.subject,
+          left: timer.left,
+          running: timer.running,
+        })
+      );
     }
-    focusHTML = '<div class="row">' +
-      '<div class="grow"><span class="task-title">' + fmtDuration(secs) + " studied</span></div>" +
-      '<span class="muted">' + count + " session" + (count == 1 ? "" : "s") + '</span>' +
-    '</div>';
-  } else {
-    focusHTML = '<p class="empty-msg">No study time yet today.</p>';
-  }
+  }, [timer]);
 
-  // sidebar: quick counts
-  var openCount = 0;
-  for (var i = 0; i < tasks.length; i++) {
-    if (!tasks[i].done) openCount++;
-  }
-  var totalStudied = 0;
-  for (var i = 0; i < sessions.length; i++) {
-    totalStudied += sessions[i].seconds;
-  }
-
-  el.innerHTML =
-    '<div class="greeting">' +
-      '<h1>' + greet + '</h1>' +
-      '<p class="date-line">' + dateStr + '</p>' +
-    '</div>' +
-    '<div class="home-grid">' +
-      '<div class="home-content">' +
-        '<section class="section">' +
-          '<div class="section-head"><h2>Today</h2><span class="note">' + leftWord + '</span></div>' +
-          todayHTML +
-        '</section>' +
-        '<section class="section">' +
-          '<div class="section-head"><h2>Next exam</h2><button class="text-btn" onclick="navigate(\'exams\')">all exams</button></div>' +
-          examHTML +
-        '</section>' +
-        '<section class="section">' +
-          '<div class="section-head"><h2>Focus</h2><button class="text-btn" onclick="navigate(\'focus\')">open timer</button></div>' +
-          focusHTML +
-        '</section>' +
-      '</div>' +
-      '<aside class="home-sidebar">' +
-        '<div class="box">' +
-          '<h3>Quick look</h3>' +
-          '<div style="margin-top:6px">' +
-            '<div style="display:flex;justify-content:space-between;border-bottom:1px solid #ddd5c2;padding:5px 0">' +
-              '<span>Open tasks</span><span class="mono">' + openCount + '</span>' +
-            '</div>' +
-            '<div style="display:flex;justify-content:space-between;border-bottom:1px solid #ddd5c2;padding:5px 0">' +
-              '<span>Subjects</span><span class="mono">' + subjects.length + '</span>' +
-            '</div>' +
-            '<div style="display:flex;justify-content:space-between;padding:5px 0">' +
-              '<span>Total studied</span><span class="mono">' + fmtDuration(totalStudied) + '</span>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</aside>' +
-    '</div>';
-}
-
-// ---- planner ----
-
-var calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-var selectedDay = todayStr();
-
-function renderPlanner() {
-  var el = document.getElementById("view-planner");
-
-  var dayTasks = [];
-  for (var i = 0; i < tasks.length; i++) {
-    if (tasks[i].due == selectedDay) dayTasks.push(tasks[i]);
-  }
-  dayTasks = sortTasks(dayTasks);
-
-  var dayHTML = "";
-  if (dayTasks.length) {
-    dayHTML = '<div class="list">';
-    for (var i = 0; i < dayTasks.length; i++) dayHTML += taskRow(dayTasks[i]);
-    dayHTML += "</div>";
-  } else {
-    dayHTML = '<p class="empty-msg">Nothing scheduled this day.</p>';
-  }
-
-  var monthLabel = calMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-
-  var weekday = parseDate(selectedDay).toLocaleDateString("en-US", { weekday: "long" });
-  var dateLabel = parseDate(selectedDay).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-
-  el.innerHTML =
-    '<div class="page-head"><h1>Planner</h1><p>Pick a day to see what\'s on it.</p></div>' +
-    '<div class="planner-content">' +
-      '<div class="cal">' +
-        '<div class="cal-head">' +
-          '<button class="btn ghost small" onclick="shiftMonth(-1)">←</button>' +
-          '<h2>' + monthLabel + '</h2>' +
-          '<button class="btn ghost small" onclick="shiftMonth(1)">→</button>' +
-        '</div>' +
-        '<div class="cal-grid">' + calCells() + '</div>' +
-      '</div>' +
-      '<div class="box day-detail">' +
-        '<h3>' + weekday + ', ' + dateLabel + '</h3>' +
-        dayHTML +
-      '</div>' +
-    '</div>';
-}
-
-function calCells() {
-  var y = calMonth.getFullYear();
-  var m = calMonth.getMonth();
-  var firstDay = new Date(y, m, 1).getDay();
-  var daysInMonth = new Date(y, m + 1, 0).getDate();
-  var today = todayStr();
-
-  var cells = [];
-
-  var dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  for (var i = 0; i < dayNames.length; i++) {
-    cells.push('<div class="cal-dow">' + dayNames[i] + "</div>");
-  }
-
-  for (var i = 0; i < firstDay; i++) {
-    cells.push('<div class="cal-day other"></div>');
-  }
-
-  for (var d = 1; d <= daysInMonth; d++) {
-    var iso = y + "-" + pad(m + 1) + "-" + pad(d);
-
-    var cls = "cal-day";
-    if (iso == today) cls += " today";
-    if (iso == selectedDay) cls += " selected";
-
-    var taskCount = 0;
-    for (var i = 0; i < tasks.length; i++) {
-      if (tasks[i].due == iso && !tasks[i].done) taskCount++;
+  useEffect(() => {
+    if (timer.total > 0 && timer.left === 0 && !timer.running) {
+      localStorage.removeItem("studyTimer");
+      setSessions((prev) => [
+        ...prev,
+        { id: uid(), subject: timer.subject, seconds: timer.total, date: todayStr(), at: Date.now() },
+      ]);
+      setToast({ id: Date.now(), message: "Session logged!" });
+      setTimer((prev) => ({ ...prev, total: 0, subject: "", endAt: 0 }));
+      setFocusSubject("");
     }
-    var dots = "";
-    for (var i = 0; i < Math.min(taskCount, 3); i++) dots += "<i></i>";
-    if (dots) dots = '<span class="dots">' + dots + "</span>";
+  }, [timer.left, timer.running, timer.total, timer.subject]);
 
-    cells.push('<div class="' + cls + '" onclick="pickDay(\'' + iso + '\')"><span class="num">' + d + "</span>" + dots + "</div>");
-  }
+  const subjectColorLookup = (name: string) => {
+    const found = subjects.find((s) => s.name.toLowerCase() === String(name).toLowerCase());
+    return found ? found.color : "";
+  };
 
-  return cells.join("");
-}
+  const addSubject = (name: string, color?: string) => {
+    if (!name.trim()) return;
 
-function pickDay(iso) {
-  selectedDay = iso;
-  renderPlanner();
-}
-
-function shiftMonth(n) {
-  calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + n, 1);
-  renderPlanner();
-}
-
-// ---- tasks page ----
-
-var taskFilter = "all";
-var editingTaskId = null;
-
-function renderTasks() {
-  var el = document.getElementById("view-tasks");
-
-  // filter buttons
-  var filterNames = ["all", "today", "upcoming", "overdue", "done"];
-  var filtersHTML = "";
-  for (var i = 0; i < filterNames.length; i++) {
-    var f = filterNames[i];
-    var label = f.charAt(0).toUpperCase() + f.slice(1);
-    var cls = "text-btn";
-    if (f == taskFilter) cls += " active";
-    filtersHTML += '<button class="' + cls + '" onclick="setFilter(\'' + f + '\')">' + label + "</button>";
-  }
-
-  // task list
-  var list = getFilteredTasks();
-  var emptyMsg = "Nothing here. Try another filter.";
-  if (!tasks.length) emptyMsg = "No tasks yet. Add one above.";
-  if (taskFilter == "done") emptyMsg = "Nothing completed yet.";
-
-  var rowsHTML = "";
-  if (list.length) {
-    for (var i = 0; i < list.length; i++) rowsHTML += taskRow(list[i]);
-  } else {
-    rowsHTML = '<p class="empty-msg">' + emptyMsg + "</p>";
-  }
-
-  el.innerHTML =
-    '<div class="page-head"><h1>Tasks</h1><p>All your tasks, right here.</p></div>' +
-    '<form class="add-form" onsubmit="submitTaskForm(event)">' +
-      '<div class="form-row">' +
-        '<div class="form-group grow2">' +
-          '<label for="taskTitle">What needs doing?</label>' +
-          '<input class="field" id="taskTitle" placeholder="e.g. Finish Biology worksheet" required>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="taskSubject">Subject</label>' +
-          '<input class="field" id="taskSubject" list="subjectOptions" placeholder="optional">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="taskDue">Due date</label>' +
-          '<input class="field" type="date" id="taskDue">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label>&nbsp;</label>' +
-          '<button class="btn" id="taskSubmitBtn" type="submit">Add task</button>' +
-        '</div>' +
-      '</div>' +
-      '<p class="edit-hint hidden" id="taskEditHint">Editing a task — <button type="button" class="text-btn" onclick="cancelEdit()">cancel</button></p>' +
-    '</form>' +
-    '<div class="filters">' + filtersHTML + '</div>' +
-    '<div class="list">' + rowsHTML + '</div>';
-}
-
-function getFilteredTasks() {
-  var today = todayStr();
-  var list = [];
-  for (var i = 0; i < tasks.length; i++) {
-    var t = tasks[i];
-    if (taskFilter == "today" && t.due == today) list.push(t);
-    else if (taskFilter == "upcoming" && !t.done && t.due && t.due > today) list.push(t);
-    else if (taskFilter == "overdue" && !t.done && t.due && t.due < today) list.push(t);
-    else if (taskFilter == "done" && t.done) list.push(t);
-    else if (taskFilter == "all") list.push(t);
-  }
-  return sortTasks(list);
-}
-
-function setFilter(f) {
-  taskFilter = f;
-  renderTasks();
-}
-
-function submitTaskForm(e) {
-  e.preventDefault();
-  var title = document.getElementById("taskTitle").value.trim();
-  var subject = document.getElementById("taskSubject").value.trim();
-  var due = document.getElementById("taskDue").value;
-  if (!title) return;
-  if (subject) addSubject(subject);
-  if (editingTaskId) {
-    // save changes to the existing task
-    for (var i = 0; i < tasks.length; i++) {
-      if (tasks[i].id == editingTaskId) {
-        tasks[i].title = title;
-        tasks[i].subject = subject;
-        tasks[i].due = due;
-        break;
+    setSubjects((prev) => {
+      const idx = prev.findIndex((s) => s.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) {
+        const copy = [...prev];
+        if (color) copy[idx] = { ...copy[idx], color };
+        return copy;
       }
+      return [...prev, { id: uid(), name, color: color || "#2c6e49" }];
+    });
+  };
+
+  const deleteSubject = (id: string) => {
+    setSubjects((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const todaySeconds = useMemo(() => {
+    const today = todayStr();
+    return sessions.reduce((sum, s) => (s.date === today ? sum + s.seconds : sum), 0);
+  }, [sessions]);
+
+  const openTaskCount = useMemo(() => tasks.filter((t) => !t.done).length, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    const today = todayStr();
+    const list = tasks.filter((t) => {
+      if (taskFilter === "today") return t.due === today;
+      if (taskFilter === "upcoming") return !t.done && !!t.due && t.due > today;
+      if (taskFilter === "overdue") return !t.done && !!t.due && t.due < today;
+      if (taskFilter === "done") return t.done;
+      return true;
+    });
+
+    return sortTasks(list);
+  }, [tasks, taskFilter]);
+
+  const nextExam = useMemo(() => {
+    const upcoming = exams.filter((e) => daysUntil(e.date) >= 0).sort((a, b) => a.date.localeCompare(b.date));
+    return upcoming[0] || null;
+  }, [exams]);
+
+  const recentSessions = useMemo(() => [...sessions].sort((a, b) => b.at - a.at).slice(0, 8), [sessions]);
+
+  const navigate = (view: View) => setCurrentView(view);
+
+  const handleTaskSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const title = taskTitle.trim();
+    const subject = taskSubject.trim();
+
+    if (!title) return;
+    if (subject) addSubject(subject);
+
+    if (editingTaskId) {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === editingTaskId ? { ...t, title, subject, due: taskDue } : t))
+      );
+      setEditingTaskId(null);
+    } else {
+      setTasks((prev) => [...prev, { id: uid(), title, subject, due: taskDue, done: false }]);
     }
-    saveTasks();
-    editingTaskId = null;
-  } else {
-    addTask(title, subject, due);
-  }
-  renderTasks();
-}
 
-function startEditTask(id) {
-  // the edit form only lives on the tasks page
-  if (!document.getElementById("taskTitle")) navigate("tasks");
-  for (var i = 0; i < tasks.length; i++) {
-    if (tasks[i].id == id) {
-      editingTaskId = id;
-      document.getElementById("taskTitle").value = tasks[i].title;
-      document.getElementById("taskSubject").value = tasks[i].subject || "";
-      document.getElementById("taskDue").value = tasks[i].due || "";
-      document.getElementById("taskSubmitBtn").textContent = "Save changes";
-      document.getElementById("taskEditHint").classList.remove("hidden");
-      document.getElementById("taskTitle").focus();
-      return;
+    setTaskTitle("");
+    setTaskSubject("");
+    setTaskDue("");
+  };
+
+  const startEditTask = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    setEditingTaskId(id);
+    setTaskTitle(task.title);
+    setTaskSubject(task.subject || "");
+    setTaskDue(task.due || "");
+    navigate("tasks");
+  };
+
+  const cancelTaskEdit = () => {
+    setEditingTaskId(null);
+    setTaskTitle("");
+    setTaskSubject("");
+    setTaskDue("");
+  };
+
+  const toggleTask = (id: string) => {
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  };
+
+  const deleteTask = (id: string) => {
+    if (!window.confirm("Delete this task?")) return;
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleExamSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const name = examName.trim();
+    const subject = examSubject.trim();
+    const notes = examNotes.trim();
+
+    if (!name || !examDate) return;
+    if (subject) addSubject(subject);
+
+    if (editingExamId) {
+      setExams((prev) =>
+        prev.map((exam) =>
+          exam.id === editingExamId ? { ...exam, name, subject, date: examDate, notes } : exam
+        )
+      );
+      setEditingExamId(null);
+    } else {
+      setExams((prev) => [...prev, { id: uid(), name, subject, date: examDate, notes }]);
     }
-  }
-}
 
-function cancelEdit() {
-  editingTaskId = null;
-  document.getElementById("taskTitle").value = "";
-  document.getElementById("taskSubject").value = "";
-  document.getElementById("taskDue").value = "";
-  document.getElementById("taskSubmitBtn").textContent = "Add task";
-  document.getElementById("taskEditHint").classList.add("hidden");
-}
+    setExamName("");
+    setExamSubject("");
+    setExamDate("");
+    setExamNotes("");
+  };
 
-function confirmDeleteTask(id) {
-  if (confirm("Delete this task?")) {
-    deleteTask(id);
-    renderCurrent();
-  }
-}
+  const startEditExam = (id: string) => {
+    const exam = exams.find((e) => e.id === id);
+    if (!exam) return;
 
-// ---- exams page ----
+    setEditingExamId(id);
+    setExamName(exam.name);
+    setExamSubject(exam.subject || "");
+    setExamDate(exam.date);
+    setExamNotes(exam.notes || "");
+    navigate("exams");
+  };
 
-var editingExamId = null;
+  const cancelExamEdit = () => {
+    setEditingExamId(null);
+    setExamName("");
+    setExamSubject("");
+    setExamDate("");
+    setExamNotes("");
+  };
 
-function renderExams() {
-  var el = document.getElementById("view-exams");
+  const deleteExam = (id: string) => {
+    if (!window.confirm("Delete this exam?")) return;
+    setExams((prev) => prev.filter((e) => e.id !== id));
+  };
 
-  // sort exams by date
-  var sorted = exams.slice();
-  sorted.sort(function (a, b) { return a.date.localeCompare(b.date); });
+  const handleSubjectSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const name = subjectName.trim();
+    if (!name) return;
+    addSubject(name, subjectColor);
+    setSubjectName("");
+    setSubjectColor("#2c6e49");
+  };
 
-  var rowsHTML = "";
-  if (sorted.length) {
-    for (var i = 0; i < sorted.length; i++) {
-      var e = sorted[i];
-      var diff = daysUntil(e.date);
-      var badge, cls;
-      if (diff < 0) { badge = "passed"; cls = "past"; }
-      else if (diff == 0) { badge = "today!"; cls = "soon"; }
-      else if (diff == 1) { badge = "tomorrow!"; cls = "soon"; }
-      else { badge = diff + " days"; cls = ""; }
+  const startTimer = () => {
+    const subject = focusSubject;
+    const total = focusDuration * 60;
+    const endAt = Date.now() + total * 1000;
 
-      // format the date and subject line directly
-      var dateFormatted = parseDate(e.date).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-      var meta = dateFormatted;
-      if (e.subject) meta = esc(e.subject) + " · " + dateFormatted;
+    setTimer({
+      running: true,
+      total,
+      left: total,
+      subject,
+      endAt,
+    });
+  };
 
-      // notes stay visible after saving so they are not lost
-      var notesHTML = "";
-      if (e.notes) notesHTML = '<div class="exam-notes">' + esc(e.notes) + '</div>';
+  const pauseTimer = () => {
+    setTimer((prev) => {
+      const left = Math.max(0, Math.round((prev.endAt - Date.now()) / 1000));
+      return { ...prev, running: false, left, endAt: 0 };
+    });
+  };
 
-      rowsHTML +=
-        '<div class="row">' +
-          '<div class="grow">' +
-            '<div class="task-title">' + esc(e.name) + '</div>' +
-            '<div class="task-meta">' + meta + '</div>' +
-            notesHTML +
-          '</div>' +
-          '<span class="countdown ' + cls + '">' + badge + '</span>' +
-          '<div class="task-actions">' +
-            '<button class="text-btn" onclick="startEditExam(\'' + e.id + '\')">edit</button>' +
-            '<button class="text-btn danger" onclick="confirmDeleteExam(\'' + e.id + '\')">delete</button>' +
-          '</div>' +
-        '</div>';
-    }
-  } else {
-    rowsHTML = '<p class="empty-msg">No exams yet. Add one when a test comes up.</p>';
-  }
+  const resumeTimer = () => {
+    setTimer((prev) => {
+      if (prev.left <= 0) return prev;
+      return {
+        ...prev,
+        running: true,
+        endAt: Date.now() + prev.left * 1000,
+      };
+    });
+  };
 
-  el.innerHTML =
-    '<div class="page-head"><h1>Exams</h1><p>Tests and their dates.</p></div>' +
-    '<form class="add-form" onsubmit="submitExamForm(event)">' +
-      '<div class="form-row">' +
-        '<div class="form-group grow2">' +
-          '<label for="examName">Exam</label>' +
-          '<input class="field" id="examName" placeholder="e.g. Biology midterm" required>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="examSubject">Subject</label>' +
-          '<input class="field" id="examSubject" list="subjectOptions" placeholder="optional">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="examDate">Date</label>' +
-          '<input class="field" type="date" id="examDate" required>' +
-        '</div>' +
-        '<div class="form-group grow2">' +
-          '<label for="examNotes">Notes</label>' +
-          '<input class="field" id="examNotes" placeholder="what\'s on it? (optional)">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label>&nbsp;</label>' +
-          '<button class="btn" id="examSubmitBtn" type="submit">Add exam</button>' +
-        '</div>' +
-      '</div>' +
-      '<p class="edit-hint hidden" id="examEditHint">Editing an exam — <button type="button" class="text-btn" onclick="cancelExamEdit()">cancel</button></p>' +
-    '</form>' +
-    '<div class="list">' + rowsHTML + '</div>';
-}
-
-function submitExamForm(e) {
-  e.preventDefault();
-  var name = document.getElementById("examName").value.trim();
-  var subject = document.getElementById("examSubject").value.trim();
-  var date = document.getElementById("examDate").value;
-  var notes = document.getElementById("examNotes").value.trim();
-  if (!name || !date) return;
-  if (subject) addSubject(subject);
-
-  if (editingExamId) {
-    // find and update the exam directly
-    for (var i = 0; i < exams.length; i++) {
-      if (exams[i].id == editingExamId) {
-        exams[i].name = name;
-        exams[i].subject = subject;
-        exams[i].date = date;
-        exams[i].notes = notes;
-        break;
-      }
-    }
-    saveExams();
-    editingExamId = null;
-  } else {
-    addExam(name, subject, date, notes);
-  }
-  renderExams();
-}
-
-function startEditExam(id) {
-  for (var i = 0; i < exams.length; i++) {
-    if (exams[i].id == id) {
-      editingExamId = id;
-      document.getElementById("examName").value = exams[i].name;
-      document.getElementById("examSubject").value = exams[i].subject || "";
-      document.getElementById("examDate").value = exams[i].date;
-      document.getElementById("examNotes").value = exams[i].notes || "";
-      document.getElementById("examSubmitBtn").textContent = "Save changes";
-      document.getElementById("examEditHint").classList.remove("hidden");
-      document.getElementById("examName").focus();
-      return;
-    }
-  }
-}
-
-function cancelExamEdit() {
-  editingExamId = null;
-  document.getElementById("examName").value = "";
-  document.getElementById("examSubject").value = "";
-  document.getElementById("examDate").value = "";
-  document.getElementById("examNotes").value = "";
-  document.getElementById("examSubmitBtn").textContent = "Add exam";
-  document.getElementById("examEditHint").classList.add("hidden");
-}
-
-function confirmDeleteExam(id) {
-  if (confirm("Delete this exam?")) {
-    for (var i = 0; i < exams.length; i++) {
-      if (exams[i].id == id) { exams.splice(i, 1); break; }
-    }
-    saveExams();
-    renderExams();
-  }
-}
-
-// ---- subjects page ----
-
-function renderSubjects() {
-  var el = document.getElementById("view-subjects");
-
-  var cardsHTML = "";
-  if (subjects.length) {
-    cardsHTML = '<div class="subject-grid">';
-    for (var i = 0; i < subjects.length; i++) {
-      var s = subjects[i];
-
-      // count open tasks for this subject
-      var openCount = 0;
-      for (var j = 0; j < tasks.length; j++) {
-        if (!tasks[j].done && tasks[j].subject && tasks[j].subject.toLowerCase() == s.name.toLowerCase()) openCount++;
-      }
-
-      // total study time for this subject
-      var studied = 0;
-      for (var j = 0; j < sessions.length; j++) {
-        if (sessions[j].subject && sessions[j].subject.toLowerCase() == s.name.toLowerCase()) studied += sessions[j].seconds;
-      }
-
-      var stats = openCount + " open task" + (openCount == 1 ? "" : "s") + " · ";
-      if (studied) stats += fmtDuration(studied) + " studied";
-      else stats += "no study time yet";
-
-      cardsHTML +=
-        '<div class="subject-item">' +
-          '<div class="subject-header">' +
-            '<span class="swatch" style="background:' + s.color + '"></span>' +
-            '<span class="subject-name">' + esc(s.name) + '</span>' +
-            '<button class="text-btn danger" onclick="confirmDeleteSubject(\'' + s.id + '\')">delete</button>' +
-          '</div>' +
-          '<p class="subject-stats">' + stats + '</p>' +
-        '</div>';
-    }
-    cardsHTML += "</div>";
-  } else {
-    cardsHTML = '<p class="empty-msg">No subjects yet. Add your classes here.</p>';
-  }
-
-  el.innerHTML =
-    '<div class="page-head"><h1>Subjects</h1><p>Your classes. Colors help you spot them in task lists.</p></div>' +
-    '<form class="add-form" onsubmit="submitSubjectForm(event)">' +
-      '<div class="form-row">' +
-        '<div class="form-group grow2">' +
-          '<label for="subjectName">Subject</label>' +
-          '<input class="field" id="subjectName" placeholder="e.g. Biology" required>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="subjectColor">Color</label>' +
-          '<input class="field" type="color" id="subjectColor" value="#2c6e49">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label>&nbsp;</label>' +
-          '<button class="btn" type="submit">Add subject</button>' +
-        '</div>' +
-      '</div>' +
-    '</form>' +
-    cardsHTML;
-}
-
-function submitSubjectForm(e) {
-  e.preventDefault();
-  var name = document.getElementById("subjectName").value.trim();
-  var color = document.getElementById("subjectColor").value;
-  if (!name) return;
-  addSubject(name, color);
-  renderSubjects();
-}
-
-function confirmDeleteSubject(id) {
-  if (confirm("Delete this subject?")) {
-    deleteSubject(id);
-    renderSubjects();
-  }
-}
-
-// ---- focus timer ----
-
-var PRESETS = [15, 25, 45, 60];
-var focusDuration = 25;
-var timer = {
-  running: false,
-  total: 0,
-  left: 0,
-  subject: "",
-  endAt: 0,
-  interval: null
-};
-
-function renderFocus() {
-  var el = document.getElementById("view-focus");
-  var todaySecs = secondsToday();
-  var todayCount = 0;
-  for (var i = 0; i < sessions.length; i++) {
-    if (sessions[i].date == todayStr()) todayCount++;
-  }
-
-  // recent sessions list
-  var recent = sessions.slice().reverse().slice(0, 8);
-  var sessionHTML = "";
-  if (recent.length) {
-    for (var i = 0; i < recent.length; i++) {
-      var s = recent[i];
-      var name = s.subject || "Focus session";
-      sessionHTML +=
-        '<div class="row">' +
-          '<div class="grow"><span class="task-title">' + esc(name) + '</span></div>' +
-          '<span class="muted">' + fmtDuration(s.seconds) + '</span>' +
-        '</div>';
-    }
-  } else {
-    sessionHTML = '<p class="empty-msg">No sessions yet.</p>';
-  }
-
-  // timer area — clock while running, setup form otherwise
-  var timerHTML = "";
-  if (timer.running || timer.left > 0) {
-    var pct = timer.total > 0 ? Math.round((timer.left / timer.total) * 100) : 0;
-    var pauseOrResume;
-    if (timer.running) pauseOrResume = '<button class="btn ghost" onclick="pauseTimer()">Pause</button>';
-    else pauseOrResume = '<button class="btn" onclick="resumeTimer()">Resume</button>';
-    var subject = timer.subject || "Focus";
-    timerHTML =
-      '<h2 class="timer-subject">' + esc(subject) + '</h2>' +
-      '<div class="timer-clock" id="timerClock">' + fmtClock(timer.left) + '</div>' +
-      '<div class="timer-progress"><div class="fill" id="timerFill" style="width:' + pct + '%"></div></div>' +
-      '<div class="timer-controls">' +
-        pauseOrResume +
-        '<button class="btn ghost" onclick="resetTimer()">Reset</button>' +
-      '</div>';
-  } else {
-    var presetsHTML = "";
-    for (var i = 0; i < PRESETS.length; i++) {
-      var m = PRESETS[i];
-      var cls = "btn ghost small preset";
-      if (m == focusDuration) cls += " active";
-      presetsHTML += '<button class="' + cls + '" onclick="setDuration(' + m + ')">' + m + " min</button>";
-    }
-    var optionsHTML = '<option value="">— none —</option>';
-    for (var i = 0; i < subjects.length; i++) {
-      var n = esc(subjects[i].name);
-      optionsHTML += '<option value="' + n + '">' + n + "</option>";
-    }
-    timerHTML =
-      '<h2>Ready to focus?</h2>' +
-      '<p class="muted">Pick a length and a subject, then start.</p>' +
-      '<div class="presets">' + presetsHTML + '</div>' +
-      '<div class="form-group">' +
-        '<label for="focusSubject">Subject (optional)</label>' +
-        '<select class="field" id="focusSubject">' + optionsHTML + '</select>' +
-      '</div>' +
-      '<button class="btn" onclick="startTimer()">Start</button>';
-  }
-
-  el.innerHTML =
-    '<div class="page-head">' +
-      '<h1>Focus</h1>' +
-      '<p>Set a timer and study one thing at a time.</p>' +
-    '</div>' +
-    '<div class="focus-layout">' +
-      '<div class="timer-box">' + timerHTML + '</div>' +
-      '<div class="focus-sidebar">' +
-        '<section class="section">' +
-          '<div class="section-head"><h2>Today</h2></div>' +
-          '<div class="stats-row">' +
-            '<div class="stat"><span class="stat-num">' + fmtClock(todaySecs) + '</span><span class="stat-label">time studied</span></div>' +
-            '<div class="stat"><span class="stat-num">' + todayCount + '</span><span class="stat-label">sessions</span></div>' +
-          '</div>' +
-        '</section>' +
-        '<section class="section">' +
-          '<div class="section-head"><h2>Recent sessions</h2></div>' +
-          sessionHTML +
-        '</section>' +
-      '</div>' +
-    '</div>';
-
-  if (timer.running) startTicker();
-}
-
-function setDuration(m) {
-  focusDuration = m;
-  renderFocus();
-}
-
-function startTimer() {
-  var sel = document.getElementById("focusSubject");
-  if (sel) timer.subject = sel.value;
-  timer.total = focusDuration * 60;
-  timer.left = timer.total;
-  timer.running = true;
-  timer.endAt = Date.now() + timer.left * 1000;
-  localStorage.setItem("studyTimer", JSON.stringify({
-    endAt: timer.endAt, total: timer.total, subject: timer.subject,
-    left: timer.left, running: true
-  }));
-  renderFocus();
-}
-
-function startTicker() {
-  clearInterval(timer.interval);
-  timer.interval = setInterval(tick, 1000);
-}
-
-function tick() {
-  timer.left = Math.max(0, Math.round((timer.endAt - Date.now()) / 1000));
-
-  var clock = document.getElementById("timerClock");
-  var fill = document.getElementById("timerFill");
-  if (clock) clock.textContent = fmtClock(timer.left);
-  if (fill) {
-    var pct = timer.total > 0 ? Math.round((timer.left / timer.total) * 100) : 0;
-    fill.style.width = pct + "%";
-  }
-
-  if (timer.left <= 0) finishTimer();
-}
-
-function pauseTimer() {
-  timer.running = false;
-  timer.left = Math.max(0, Math.round((timer.endAt - Date.now()) / 1000));
-  clearInterval(timer.interval);
-  // keep the paused state so a refresh does not lose it
-  localStorage.setItem("studyTimer", JSON.stringify({
-    endAt: 0, total: timer.total, subject: timer.subject,
-    left: timer.left, running: false
-  }));
-  renderFocus();
-}
-
-function resumeTimer() {
-  if (timer.left <= 0) return;
-  timer.endAt = Date.now() + timer.left * 1000;
-  timer.running = true;
-  localStorage.setItem("studyTimer", JSON.stringify({
-    endAt: timer.endAt, total: timer.total, subject: timer.subject,
-    left: timer.left, running: true
-  }));
-  renderFocus();
-}
-
-function resetTimer() {
-  timer.running = false;
-  timer.left = 0;
-  clearInterval(timer.interval);
-  localStorage.removeItem("studyTimer");
-  renderFocus();
-}
-
-function finishTimer() {
-  timer.running = false;
-  timer.left = 0;
-  clearInterval(timer.interval);
-  localStorage.removeItem("studyTimer");
-  addSession(timer.subject, timer.total);
-  toast("Session logged!");
-  renderFocus();
-}
-
-// restore timer if page was refreshed mid-session
-function restoreTimer() {
-  var saved = JSON.parse(localStorage.getItem("studyTimer") || "null");
-  if (!saved) return;
-  // a saved running timer is restored from its end time; a paused one keeps its leftover time
-  var left = saved.running === false
-    ? saved.left
-    : Math.round((saved.endAt - Date.now()) / 1000);
-  if (left > 0) {
-    timer.total = saved.total;
-    timer.left = left;
-    timer.subject = saved.subject || "";
-    timer.endAt = saved.endAt;
-    timer.running = saved.running !== false;
-  } else {
+  const resetTimer = () => {
     localStorage.removeItem("studyTimer");
-    addSession(saved.subject || "", saved.total);
-  }
+    setTimer({
+      running: false,
+      total: 0,
+      left: 0,
+      subject: "",
+      endAt: 0,
+    });
+  };
+
+  const shiftMonth = (n: number) => {
+    setCalMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + n, 1));
+  };
+
+  const renderTaskRow = (task: Task) => {
+    const color = subjectColorLookup(task.subject);
+    const overdue = !task.done && !!task.due && task.due < todayStr();
+
+    let dueLabel = "";
+    if (task.due) {
+      const diff = daysUntil(task.due);
+      if (diff < 0) dueLabel = "overdue";
+      else if (diff === 0) dueLabel = "today";
+      else if (diff === 1) dueLabel = "tomorrow";
+      else dueLabel = fmtShort(task.due);
+    }
+
+    return (
+      <div className={`row task-row ${task.done ? "done" : ""}`} key={task.id}>
+        <input type="checkbox" checked={task.done} onChange={() => toggleTask(task.id)} />
+        <div className="grow">
+          <div className="task-title">
+            {color ? <span className="dot" style={{ background: color }} /> : null}
+            {task.title}
+          </div>
+          <div className="task-meta">
+            {task.subject ? <span>{task.subject}</span> : null}
+            {task.subject && task.due ? <span> · </span> : null}
+            {task.due ? <span className={overdue ? "overdue" : ""}>{dueLabel}</span> : null}
+          </div>
+        </div>
+        <div className="task-actions">
+          <button className="text-btn" onClick={() => startEditTask(task.id)} type="button">
+            edit
+          </button>
+          <button className="text-btn danger" onClick={() => deleteTask(task.id)} type="button">
+            delete
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHome = () => {
+    const hour = new Date().getHours();
+    const greet = hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
+    const dateText = new Date().toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+
+    const today = todayStr();
+    const dueNow = sortTasks(tasks.filter((t) => !t.done && !!t.due && t.due <= today));
+    const leftWord = dueNow.length
+      ? `${dueNow.length} thing${dueNow.length === 1 ? "" : "s"} left`
+      : "all clear";
+
+    const totalStudied = sessions.reduce((sum, s) => sum + s.seconds, 0);
+    const todayCount = sessions.filter((s) => s.date === today).length;
+
+    return (
+      <div className="view active" id="view-home">
+        <div className="greeting">
+          <h1>{greet}</h1>
+          <p className="date-line">{dateText}</p>
+        </div>
+
+        <div className="home-grid">
+          <div className="home-content">
+            <section className="section">
+              <div className="section-head">
+                <h2>Today</h2>
+                <span className="note">{leftWord}</span>
+              </div>
+              <div className="list">
+                {dueNow.length ? dueNow.slice(0, 6).map(renderTaskRow) : <p className="empty-msg">Nothing due today.</p>}
+              </div>
+              {dueNow.length > 6 ? <p className="muted">...and {dueNow.length - 6} more in Tasks.</p> : null}
+            </section>
+
+            <section className="section">
+              <div className="section-head">
+                <h2>Next exam</h2>
+                <button className="text-btn" type="button" onClick={() => navigate("exams")}>
+                  all exams
+                </button>
+              </div>
+              {nextExam ? (
+                <div className="row">
+                  <div className="grow">
+                    <span className="task-title">{nextExam.name}</span>
+                    {nextExam.subject ? <span className="tag">{nextExam.subject}</span> : null}
+                  </div>
+                  <span className="exam-when">
+                    {daysUntil(nextExam.date) === 0
+                      ? "today!"
+                      : daysUntil(nextExam.date) === 1
+                        ? "tomorrow"
+                        : `${fmtShort(nextExam.date)} · in ${daysUntil(nextExam.date)} days`}
+                  </span>
+                </div>
+              ) : (
+                <p className="empty-msg">No exams scheduled.</p>
+              )}
+            </section>
+
+            <section className="section">
+              <div className="section-head">
+                <h2>Focus</h2>
+                <button className="text-btn" type="button" onClick={() => navigate("focus")}>
+                  open timer
+                </button>
+              </div>
+
+              {todaySeconds > 0 ? (
+                <div className="row">
+                  <div className="grow">
+                    <span className="task-title">{fmtDuration(todaySeconds)} studied</span>
+                  </div>
+                  <span className="muted">
+                    {todayCount} session{todayCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+              ) : (
+                <p className="empty-msg">No study time yet today.</p>
+              )}
+            </section>
+          </div>
+
+          <aside className="home-sidebar">
+            <div className="box">
+              <h3>Quick look</h3>
+              <div className="quick-row">
+                <span>Open tasks</span>
+                <span className="mono">{openTaskCount}</span>
+              </div>
+              <div className="quick-row">
+                <span>Subjects</span>
+                <span className="mono">{subjects.length}</span>
+              </div>
+              <div className="quick-row no-border">
+                <span>Total studied</span>
+                <span className="mono">{fmtDuration(totalStudied)}</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPlanner = () => {
+    const y = calMonth.getFullYear();
+    const m = calMonth.getMonth();
+    const firstDay = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const today = todayStr();
+    const monthLabel = calMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    const dayTasks = sortTasks(tasks.filter((t) => t.due === selectedDay));
+
+    return (
+      <div className="view active" id="view-planner">
+        <div className="page-head">
+          <h1>Planner</h1>
+          <p>Pick a day to see what is on it.</p>
+        </div>
+
+        <div className="planner-content">
+          <div className="cal">
+            <div className="cal-head">
+              <button className="btn ghost small" type="button" onClick={() => shiftMonth(-1)}>
+                ←
+              </button>
+              <h2>{monthLabel}</h2>
+              <button className="btn ghost small" type="button" onClick={() => shiftMonth(1)}>
+                →
+              </button>
+            </div>
+
+            <div className="cal-grid">
+              {dayNames.map((d) => (
+                <div className="cal-dow" key={d}>
+                  {d}
+                </div>
+              ))}
+
+              {Array.from({ length: firstDay }).map((_, i) => (
+                <div className="cal-day other" key={`empty-${i}`} />
+              ))}
+
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const d = i + 1;
+                const iso = `${y}-${pad(m + 1)}-${pad(d)}`;
+                const taskCount = tasks.filter((t) => !t.done && t.due === iso).length;
+                const cls = [
+                  "cal-day",
+                  iso === today ? "today" : "",
+                  iso === selectedDay ? "selected" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
+                return (
+                  <button className={cls} key={iso} type="button" onClick={() => setSelectedDay(iso)}>
+                    <span className="num">{d}</span>
+                    {taskCount > 0 ? (
+                      <span className="dots">
+                        {Array.from({ length: Math.min(taskCount, 3) }).map((__, idx) => (
+                          <i key={`${iso}-dot-${idx}`} />
+                        ))}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="box day-detail">
+            <h3>
+              {parseDate(selectedDay).toLocaleDateString("en-US", { weekday: "long" })},{" "}
+              {parseDate(selectedDay).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+            </h3>
+            <div className="list">
+              {dayTasks.length ? dayTasks.map(renderTaskRow) : <p className="empty-msg">Nothing scheduled this day.</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTasks = () => {
+    const filters = ["all", "today", "upcoming", "overdue", "done"];
+    const empty =
+      tasks.length === 0
+        ? "No tasks yet. Add one above."
+        : taskFilter === "done"
+          ? "Nothing completed yet."
+          : "Nothing here. Try another filter.";
+
+    return (
+      <div className="view active" id="view-tasks">
+        <div className="page-head">
+          <h1>Tasks</h1>
+          <p>All your tasks, right here.</p>
+        </div>
+
+        <form className="add-form" onSubmit={handleTaskSubmit}>
+          <div className="form-row">
+            <div className="form-group grow2">
+              <label htmlFor="taskTitle">What needs doing?</label>
+              <input
+                className="field"
+                id="taskTitle"
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                placeholder="e.g. Finish Biology worksheet"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="taskSubject">Subject</label>
+              <input
+                className="field"
+                id="taskSubject"
+                list="subjectOptions"
+                value={taskSubject}
+                onChange={(e) => setTaskSubject(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="taskDue">Due date</label>
+              <input
+                className="field"
+                type="date"
+                id="taskDue"
+                value={taskDue}
+                onChange={(e) => setTaskDue(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label> </label>
+              <button className="btn" type="submit">
+                {editingTaskId ? "Save changes" : "Add task"}
+              </button>
+            </div>
+          </div>
+
+          {editingTaskId ? (
+            <p className="edit-hint">
+              Editing a task -{" "}
+              <button type="button" className="text-btn" onClick={cancelTaskEdit}>
+                cancel
+              </button>
+            </p>
+          ) : null}
+        </form>
+
+        <div className="filters">
+          {filters.map((f) => (
+            <button
+              key={f}
+              className={`text-btn ${taskFilter === f ? "active" : ""}`}
+              type="button"
+              onClick={() => setTaskFilter(f)}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <div className="list">{filteredTasks.length ? filteredTasks.map(renderTaskRow) : <p className="empty-msg">{empty}</p>}</div>
+      </div>
+    );
+  };
+
+  const renderExams = () => {
+    const sorted = [...exams].sort((a, b) => a.date.localeCompare(b.date));
+
+    return (
+      <div className="view active" id="view-exams">
+        <div className="page-head">
+          <h1>Exams</h1>
+          <p>Tests and their dates.</p>
+        </div>
+
+        <form className="add-form" onSubmit={handleExamSubmit}>
+          <div className="form-row">
+            <div className="form-group grow2">
+              <label htmlFor="examName">Exam</label>
+              <input
+                className="field"
+                id="examName"
+                value={examName}
+                onChange={(e) => setExamName(e.target.value)}
+                placeholder="e.g. Biology midterm"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="examSubject">Subject</label>
+              <input
+                className="field"
+                id="examSubject"
+                list="subjectOptions"
+                value={examSubject}
+                onChange={(e) => setExamSubject(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="examDate">Date</label>
+              <input
+                className="field"
+                type="date"
+                id="examDate"
+                value={examDate}
+                onChange={(e) => setExamDate(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group grow2">
+              <label htmlFor="examNotes">Notes</label>
+              <input
+                className="field"
+                id="examNotes"
+                value={examNotes}
+                onChange={(e) => setExamNotes(e.target.value)}
+                placeholder="what is on it? (optional)"
+              />
+            </div>
+
+            <div className="form-group">
+              <label> </label>
+              <button className="btn" type="submit">
+                {editingExamId ? "Save changes" : "Add exam"}
+              </button>
+            </div>
+          </div>
+
+          {editingExamId ? (
+            <p className="edit-hint">
+              Editing an exam -{" "}
+              <button type="button" className="text-btn" onClick={cancelExamEdit}>
+                cancel
+              </button>
+            </p>
+          ) : null}
+        </form>
+
+        <div className="list">
+          {sorted.length ? (
+            sorted.map((exam) => {
+              const diff = daysUntil(exam.date);
+              const cls = diff < 0 ? "past" : diff <= 1 ? "soon" : "";
+              const label = diff < 0 ? "passed" : diff === 0 ? "today!" : diff === 1 ? "tomorrow!" : `${diff} days`;
+
+              const dateFormatted = parseDate(exam.date).toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+              });
+
+              return (
+                <div className="row" key={exam.id}>
+                  <div className="grow">
+                    <div className="task-title">{exam.name}</div>
+                    <div className="task-meta">
+                      {exam.subject ? `${exam.subject} · ${dateFormatted}` : dateFormatted}
+                    </div>
+                    {exam.notes ? <div className="exam-notes">{exam.notes}</div> : null}
+                  </div>
+                  <span className={`countdown ${cls}`}>{label}</span>
+                  <div className="task-actions">
+                    <button type="button" className="text-btn" onClick={() => startEditExam(exam.id)}>
+                      edit
+                    </button>
+                    <button type="button" className="text-btn danger" onClick={() => deleteExam(exam.id)}>
+                      delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="empty-msg">No exams yet. Add one when a test comes up.</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSubjects = () => {
+    return (
+      <div className="view active" id="view-subjects">
+        <div className="page-head">
+          <h1>Subjects</h1>
+          <p>Your classes. Colors help you spot them in task lists.</p>
+        </div>
+
+        <form className="add-form" onSubmit={handleSubjectSubmit}>
+          <div className="form-row">
+            <div className="form-group grow2">
+              <label htmlFor="subjectName">Subject</label>
+              <input
+                className="field"
+                id="subjectName"
+                value={subjectName}
+                onChange={(e) => setSubjectName(e.target.value)}
+                placeholder="e.g. Biology"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="subjectColor">Color</label>
+              <input
+                className="field"
+                type="color"
+                id="subjectColor"
+                value={subjectColor}
+                onChange={(e) => setSubjectColor(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label> </label>
+              <button className="btn" type="submit">
+                Add subject
+              </button>
+            </div>
+          </div>
+        </form>
+
+        {subjects.length ? (
+          <div className="subject-grid">
+            {subjects.map((s) => {
+              const open = tasks.filter(
+                (t) => !t.done && t.subject && t.subject.toLowerCase() === s.name.toLowerCase()
+              ).length;
+
+              const studied = sessions.reduce((sum, session) => {
+                if (session.subject && session.subject.toLowerCase() === s.name.toLowerCase()) {
+                  return sum + session.seconds;
+                }
+                return sum;
+              }, 0);
+
+              return (
+                <div className="subject-item" key={s.id}>
+                  <div className="subject-header">
+                    <span className="swatch" style={{ background: s.color }} />
+                    <span className="subject-name">{s.name}</span>
+                    <button
+                      className="text-btn danger"
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Delete this subject?")) {
+                          deleteSubject(s.id);
+                        }
+                      }}
+                    >
+                      delete
+                    </button>
+                  </div>
+                  <p className="subject-stats">
+                    {open} open task{open === 1 ? "" : "s"} · {studied ? `${fmtDuration(studied)} studied` : "no study time yet"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-msg">No subjects yet. Add your classes here.</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderFocus = () => {
+    const todayCount = sessions.filter((s) => s.date === todayStr()).length;
+
+    return (
+      <div className="view active" id="view-focus">
+        <div className="page-head">
+          <h1>Focus</h1>
+          <p>Set a timer and study one thing at a time.</p>
+        </div>
+
+        <div className="focus-layout">
+          <div className="timer-box">
+            {timer.running || timer.left > 0 ? (
+              <>
+                <h2 className="timer-subject">{timer.subject || "Focus"}</h2>
+                <div className="timer-clock">{fmtClock(timer.left)}</div>
+                <div className="timer-progress">
+                  <div
+                    className="fill"
+                    style={{ width: `${timer.total > 0 ? Math.round((timer.left / timer.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="timer-controls">
+                  {timer.running ? (
+                    <button className="btn ghost" type="button" onClick={pauseTimer}>
+                      Pause
+                    </button>
+                  ) : (
+                    <button className="btn" type="button" onClick={resumeTimer}>
+                      Resume
+                    </button>
+                  )}
+                  <button className="btn ghost" type="button" onClick={resetTimer}>
+                    Reset
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>Ready to focus?</h2>
+                <p className="muted">Pick a length and a subject, then start.</p>
+                <div className="presets">
+                  {PRESETS.map((m) => (
+                    <button
+                      type="button"
+                      className={`btn ghost small preset ${m === focusDuration ? "active" : ""}`}
+                      key={m}
+                      onClick={() => setFocusDuration(m)}
+                    >
+                      {m} min
+                    </button>
+                  ))}
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="focusSubject">Subject (optional)</label>
+                  <select
+                    className="field"
+                    id="focusSubject"
+                    value={focusSubject}
+                    onChange={(e) => setFocusSubject(e.target.value)}
+                  >
+                    <option value="">- none -</option>
+                    {subjects.map((s) => (
+                      <option value={s.name} key={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button className="btn" type="button" onClick={startTimer}>
+                  Start
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="focus-sidebar">
+            <section className="section">
+              <div className="section-head">
+                <h2>Today</h2>
+              </div>
+              <div className="stats-row">
+                <div className="stat">
+                  <span className="stat-num">{fmtClock(todaySeconds)}</span>
+                  <span className="stat-label">time studied</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-num">{todayCount}</span>
+                  <span className="stat-label">sessions</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="section">
+              <div className="section-head">
+                <h2>Recent sessions</h2>
+              </div>
+              <div className="list">
+                {recentSessions.length ? (
+                  recentSessions.map((session) => (
+                    <div className="row" key={session.id}>
+                      <div className="grow">
+                        <span className="task-title">{session.subject || "Focus session"}</span>
+                      </div>
+                      <span className="muted">{fmtDuration(session.seconds)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-msg">No sessions yet.</p>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <header className="site-header">
+        <div className="header-inner">
+          <button className="brand" type="button" onClick={() => navigate("home")}>
+            Study OS
+          </button>
+          <p className="brand-subtitle">Personal study planner</p>
+
+          <nav className="main-nav" aria-label="Main navigation">
+            {(["home", "focus", "planner", "tasks", "exams", "subjects"] as View[]).map((view) => (
+              <button
+                type="button"
+                key={view}
+                data-nav={view}
+                className={`nav-link ${currentView === view ? "active" : ""}`}
+                onClick={() => navigate(view)}
+              >
+                {view.charAt(0).toUpperCase() + view.slice(1)}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      <main className="page">
+        {currentView === "home" ? renderHome() : null}
+        {currentView === "focus" ? renderFocus() : null}
+        {currentView === "planner" ? renderPlanner() : null}
+        {currentView === "tasks" ? renderTasks() : null}
+        {currentView === "exams" ? renderExams() : null}
+        {currentView === "subjects" ? renderSubjects() : null}
+      </main>
+
+      <datalist id="subjectOptions">
+        {subjects.map((s) => (
+          <option value={s.name} key={s.id} />
+        ))}
+      </datalist>
+
+      {toast ? (
+        <div className="toast" key={toast.id}>
+          {toast.message}
+        </div>
+      ) : null}
+    </>
+  );
 }
-
-// ---- start ----
-
-document.addEventListener("DOMContentLoaded", function () {
-  refreshSubjectOptions();
-  restoreTimer();
-
-  var views = ["home", "focus", "planner", "tasks", "exams", "subjects"];
-  var hash = location.hash.slice(1);
-  if (views.indexOf(hash) != -1) navigate(hash);
-  else navigate("home");
-});
