@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Study OS
+   simple student website styling: flat colours, plain borders, no effects */
+
+/* ---------- base ---------- */
 
 * {
   box-sizing: border-box;
@@ -9,7 +12,7 @@
 body {
   background: #f4f1e8;
   color: #1f2f25;
-  font-family: "Arial", "Helvetica", sans-serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 16px;
   line-height: 1.45;
 }
@@ -21,6 +24,8 @@ h3 {
   font-weight: 700;
   line-height: 1.2;
 }
+
+/* ---------- header ---------- */
 
 .site-header {
   background: #fcfbf7;
@@ -40,7 +45,6 @@ h3 {
   color: #1f2f25;
   font-family: "Fraunces", Georgia, serif;
   font-size: 34px;
-  letter-spacing: 0.5px;
   cursor: pointer;
 }
 
@@ -64,6 +68,7 @@ h3 {
   color: #42513f;
   padding: 6px 12px;
   font-size: 14px;
+  font-family: inherit;
   cursor: pointer;
 }
 
@@ -77,10 +82,20 @@ h3 {
   color: #ffffff;
 }
 
+/* ---------- page frame ---------- */
+
 .page {
   max-width: 920px;
   margin: 0 auto;
   padding: 26px 16px 50px;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
 }
 
 .page-head {
@@ -110,18 +125,7 @@ h3 {
   color: #667164;
 }
 
-.home-grid {
-  display: block;
-}
-
-.home-content,
-.home-sidebar {
-  width: 100%;
-}
-
-.home-sidebar {
-  margin-top: 20px;
-}
+/* ---------- sections ---------- */
 
 .section {
   margin-bottom: 26px;
@@ -150,11 +154,12 @@ h3 {
   font-size: 13px;
 }
 
+/* ---------- forms ---------- */
+
 .add-form,
 .box,
 .timer-box,
 .focus-sidebar,
-.cal,
 .day-detail,
 .subject-item {
   border: 1px solid #d8d1bf;
@@ -167,6 +172,10 @@ h3 {
 .focus-sidebar,
 .day-detail {
   padding: 14px;
+}
+
+.add-form {
+  margin-bottom: 18px;
 }
 
 .form-row {
@@ -190,7 +199,7 @@ h3 {
 
 .form-group label {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .field {
@@ -212,13 +221,25 @@ input[type="color"].field {
   padding: 2px;
 }
 
+.edit-hint {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.hidden {
+  display: none;
+}
+
+/* ---------- buttons ---------- */
+
 .btn {
   border: 1px solid #2e6646;
   background: #2e6646;
   color: #ffffff;
   padding: 8px 12px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: bold;
+  font-family: inherit;
   cursor: pointer;
 }
 
@@ -251,8 +272,9 @@ input[type="color"].field {
   background: none;
   color: #4c5a49;
   text-decoration: underline;
-  font-weight: 700;
+  font-weight: bold;
   font-size: 13px;
+  font-family: inherit;
   cursor: pointer;
   padding: 1px 4px;
 }
@@ -269,10 +291,7 @@ input[type="color"].field {
   color: #ab3025;
 }
 
-.edit-hint {
-  margin-top: 8px;
-  font-size: 14px;
-}
+/* ---------- lists ---------- */
 
 .filters {
   margin: 6px 0 10px;
@@ -292,7 +311,7 @@ input[type="color"].field {
 }
 
 .task-title {
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .task-actions {
@@ -318,7 +337,7 @@ input[type="color"].field {
 
 .overdue {
   color: #ab3025;
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .dot,
@@ -346,7 +365,7 @@ input[type="color"].field {
   color: #4c5a49;
   padding: 2px 6px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .tag {
@@ -385,6 +404,8 @@ input[type="color"].field {
 .quick-row.no-border {
   border-bottom: 0;
 }
+
+/* ---------- focus page ---------- */
 
 .focus-layout {
   display: grid;
@@ -455,6 +476,8 @@ input[type="color"].field {
   font-size: 22px;
 }
 
+/* ---------- planner ---------- */
+
 .planner-content {
   display: grid;
   grid-template-columns: 1fr 300px;
@@ -462,6 +485,8 @@ input[type="color"].field {
 }
 
 .cal {
+  border: 1px solid #d8d1bf;
+  background: #fcfbf7;
   padding: 12px;
 }
 
@@ -486,7 +511,7 @@ input[type="color"].field {
   text-align: center;
   color: #667164;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: bold;
   padding: 2px 0;
 }
 
@@ -497,8 +522,6 @@ input[type="color"].field {
   padding: 4px;
   text-align: left;
   cursor: pointer;
-  font-family: inherit;
-  color: inherit;
 }
 
 .cal-day:hover {
@@ -519,7 +542,7 @@ input[type="color"].field {
 }
 
 .cal-day .num {
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .cal-day .dots {
@@ -540,6 +563,8 @@ input[type="color"].field {
   margin-bottom: 6px;
 }
 
+/* ---------- subjects ---------- */
+
 .subject-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -554,12 +579,14 @@ input[type="color"].field {
 
 .subject-name {
   flex: 1;
-  font-weight: 700;
+  font-weight: bold;
 }
 
 .subject-stats {
   margin-top: 6px;
 }
+
+/* ---------- toast ---------- */
 
 .toast {
   position: fixed;
@@ -568,10 +595,12 @@ input[type="color"].field {
   transform: translateX(-50%);
   border: 1px solid #2e6646;
   background: #2e6646;
-  color: #fff;
+  color: #ffffff;
   padding: 8px 12px;
-  font-weight: 700;
+  font-weight: bold;
 }
+
+/* ---------- small screens ---------- */
 
 @media (max-width: 840px) {
   .focus-layout,
