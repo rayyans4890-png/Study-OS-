@@ -1,18 +1,53 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Study OS</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&family=IBM+Plex+Mono:wght@400;600&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Study OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- header: title centered, navigation underneath -->
+  <header class="site-header">
+    <div class="header-inner">
+      <button class="brand" type="button" id="brandBtn">Study OS</button>
+      <p class="brand-subtitle">Personal study planner</p>
+
+      <nav class="main-nav" id="mainNav" aria-label="Main navigation">
+        <button class="nav-link active" type="button" data-nav="home">Home</button>
+        <button class="nav-link" type="button" data-nav="focus">Focus</button>
+        <button class="nav-link" type="button" data-nav="planner">Planner</button>
+        <button class="nav-link" type="button" data-nav="tasks">Tasks</button>
+        <button class="nav-link" type="button" data-nav="exams">Exams</button>
+        <button class="nav-link" type="button" data-nav="subjects">Subjects</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- one container per page, only the active one is shown -->
+  <main class="page">
+    <noscript>
+      <p class="empty-msg">Study OS needs JavaScript to be turned on.</p>
+    </noscript>
+
+    <!-- starts visible with a placeholder so a failed script cannot leave a blank page -->
+    <div id="view-home" class="view active">
+      <p class="empty-msg">Loading Study OS…</p>
+    </div>
+    <div id="view-focus" class="view"></div>
+    <div id="view-planner" class="view"></div>
+    <div id="view-tasks" class="view"></div>
+    <div id="view-exams" class="view"></div>
+    <div id="view-subjects" class="view"></div>
+  </main>
+
+  <!-- subject names offered as suggestions in the task/exam forms -->
+  <datalist id="subjectOptions"></datalist>
+
+  <script src="app.js"></script>
+</body>
 </html>
